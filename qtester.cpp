@@ -15,16 +15,16 @@ constexpr auto MAX_BUFFER_SIZE = qsizetype(64);
 
 QTester::QTester(QWidget* parent)
     : QMainWindow(parent)
-    , mUI(std::make_unique<Ui::QTester>())
     , mTimer(std::make_unique<QTimer>(this))
+    , mUI(std::make_unique<Ui::QTester>())
     , mFirmwareFile(nullptr)
     , mFirmwareStream(nullptr) {
     mUI->setupUi(this);
     mUI->statusBar->showMessage("searching...");
-    mUI->userInput->setFocus();
+
     mUI->userInput->installEventFilter(this);
 
-    QObject::connect(
+    connect(
         mTimer.get(),
         &QTimer::timeout,
         this,
@@ -32,13 +32,7 @@ QTester::QTester(QWidget* parent)
 
     mTimer->start(1000);
 
-    QObject::connect(
-        mUI->updateFirmware,
-        &QPushButton::clicked,
-        this,
-        &QTester::startFirmwareUpdate);
-
-    QObject::connect(
+    connect(
         mUI->clearLogSerial,
         &QPushButton::clicked,
         mUI->logSerial,
@@ -120,6 +114,9 @@ void QTester::streamAndConsumeBuffer(QByteArray& buffer) {
 }
 
 void QTester::sendRawBufferToMachine(QByteArray bytes) {
+    if (not mPort or not mPort->isOpen())
+        return;
+
     if (bytes.isEmpty())
         return;
 
