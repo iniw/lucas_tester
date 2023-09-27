@@ -37,6 +37,85 @@ QTester::QTester(QWidget* parent)
         &QPushButton::clicked,
         mUI->logSerial,
         &QTextEdit::clear);
+
+    connect(
+        mUI->testPump,
+        &QPushButton::pressed,
+        this,
+        [this] { sendRawBufferToMachine("$L2 T0 S1$"); });
+
+    connect(
+        mUI->testPump,
+        &QPushButton::released,
+        this,
+        [this] { sendRawBufferToMachine("$L5 T0 S0$"); });
+
+    connect(
+        mUI->testResistance,
+        &QPushButton::pressed,
+        this,
+        [this] { sendRawBufferToMachine("$L2 T1 S1$"); });
+
+    connect(
+        mUI->testResistance,
+        &QPushButton::released,
+        this,
+        [this] { sendRawBufferToMachine("$L5 T1 S0$"); });
+
+    connect(
+        mUI->xAxisLeft,
+        &QToolButton::clicked,
+        this,
+        [this] { sendRawBufferToMachine("$G91\nG0 X-1$"); });
+
+    connect(
+        mUI->xAxisRight,
+        &QToolButton::clicked,
+        this,
+        [this] { sendRawBufferToMachine("$G91\nG0 X1$"); });
+
+    connect(
+        mUI->yAxisDown,
+        &QToolButton::clicked,
+        this,
+        [this] { sendRawBufferToMachine("$G91\nG0 Y-1$"); });
+
+    connect(
+        mUI->yAxisUp,
+        &QToolButton::clicked,
+        this,
+        [this] { sendRawBufferToMachine("$G91\nG0 Y1$"); });
+
+    mUI->testButtonLed->setText("Testar LED do botão 1");
+    mUI->testPowerLed->setText("Testar PowerLED 1");
+
+    connect(
+        mUI->selectedStation,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this] (int index) {
+            mUI->testButtonLed->setText(QString("Testar LED do botão %1").arg(index + 1));
+            mUI->testPowerLed->setText(QString("Testar PowerLED %1").arg(index + 1));
+        });
+
+    connect(
+        mUI->testButtonLed,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            auto gcode = QString("$L5 T2 S%1$").arg(mUI->selectedStation->currentIndex());
+            sendRawBufferToMachine(gcode.toLatin1());
+        });
+
+    connect(
+        mUI->testPowerLed,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            auto gcode = QString("$L5 T3 S%1$").arg(mUI->selectedStation->currentIndex());
+            sendRawBufferToMachine(gcode.toLatin1());
+        });
+
 }
 
 static bool isValidDelimiter(char c) {
