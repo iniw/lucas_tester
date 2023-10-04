@@ -42,7 +42,7 @@ QTester::QTester(QWidget* parent)
         mUI->testPump,
         &QPushButton::pressed,
         this,
-        [this] { sendRawBufferToMachine("$L2 T0 S1$"); });
+        [this] { sendRawBufferToMachine("$L5 T0 S1$"); });
 
     connect(
         mUI->testPump,
@@ -54,7 +54,7 @@ QTester::QTester(QWidget* parent)
         mUI->testResistance,
         &QPushButton::pressed,
         this,
-        [this] { sendRawBufferToMachine("$L2 T1 S1$"); });
+        [this] { sendRawBufferToMachine("$L5 T1 S1$"); });
 
     connect(
         mUI->testResistance,
@@ -63,40 +63,73 @@ QTester::QTester(QWidget* parent)
         [this] { sendRawBufferToMachine("$L5 T1 S0$"); });
 
     connect(
+        mUI->testBeeper,
+        &QPushButton::pressed,
+        this,
+        [this] { sendRawBufferToMachine("$L5 T6 S1$"); });
+
+    connect(
+        mUI->testBeeper,
+        &QPushButton::released,
+        this,
+        [this] { sendRawBufferToMachine("$L5 T6 S0$"); });
+
+    connect(
+        mUI->logFlowSensor,
+        &QCheckBox::clicked,
+        this,
+        [this] {
+            auto gcode = QString("$L5 T4 S%1$").arg(int(mUI->logFlowSensor->isChecked()));
+            sendRawBufferToMachine(gcode.toLatin1());
+        });
+
+    connect(
+        mUI->logTemperature,
+        &QCheckBox::clicked,
+        this,
+        [this] {
+            auto gcode = QString("$L5 T5 S%1$").arg(int(mUI->logTemperature->isChecked()));
+            sendRawBufferToMachine(gcode.toLatin1());
+        });
+
+    connect(
         mUI->xAxisLeft,
         &QToolButton::clicked,
         this,
-        [this] { sendRawBufferToMachine("$G91\nG0 X-1$"); });
+        [this] { sendRawBufferToMachine("$G0 X-1$"); });
 
     connect(
         mUI->xAxisRight,
         &QToolButton::clicked,
         this,
-        [this] { sendRawBufferToMachine("$G91\nG0 X1$"); });
+        [this] { sendRawBufferToMachine("$G0 X1$"); });
 
     connect(
         mUI->yAxisDown,
         &QToolButton::clicked,
         this,
-        [this] { sendRawBufferToMachine("$G91\nG0 Y-1$"); });
+        [this] { sendRawBufferToMachine("$G0 Y-1$"); });
 
     connect(
         mUI->yAxisUp,
         &QToolButton::clicked,
         this,
-        [this] { sendRawBufferToMachine("$G91\nG0 Y1$"); });
+        [this] { sendRawBufferToMachine("$G0 Y1$"); });
 
-    mUI->testButtonLed->setText("Testar LED do botão 1");
-    mUI->testPowerLed->setText("Testar PowerLED 1");
+    const auto changeLedText = [this](int index) {
+        auto str1 = QString("Testar LED do botão %1").arg(index + 1);
+        auto str2 = QString("Testar PowerLED %1").arg(index + 1);
+        mUI->testButtonLed->setText(str1);
+        mUI->testPowerLed->setText(str2);
+    };
+
+    changeLedText(mUI->selectedStation->currentIndex());
 
     connect(
         mUI->selectedStation,
         &QComboBox::currentIndexChanged,
         this,
-        [this] (int index) {
-            mUI->testButtonLed->setText(QString("Testar LED do botão %1").arg(index + 1));
-            mUI->testPowerLed->setText(QString("Testar PowerLED %1").arg(index + 1));
-        });
+        changeLedText);
 
     connect(
         mUI->testButtonLed,
@@ -137,13 +170,13 @@ void QTester::interpretLineFromMachine(QByteArray bytes) {
 
         if (not isValidDelimiter(bytes.front())) {
             if (bytes.startsWith("ERRO:")) {
-                const auto html = QString(R"(<p style="color:crimson;">%1<span style="color:white;">%2<br></p>)").arg(bytes.first(5), bytes.sliced(5));
+                const auto html = QString(R"(<p style="color:crimson;">%1<span style="color:black;">%2<br></p>)").arg(bytes.first(5), bytes.sliced(5));
                 mUI->logSerial->insertHtml(html);
             } else if (isalpha(bytes[0]) and bytes[1] == ':') {
-                const auto html = QString(R"(<p style="color:skyblue;">%1<span style="color:white;">%2<br></p>)").arg(bytes.first(2), bytes.sliced(2));
+                const auto html = QString(R"(<p style="color:skyblue;">%1<span style="color:black;">%2<br></p>)").arg(bytes.first(2), bytes.sliced(2));
                 mUI->logSerial->insertHtml(html);
             } else {
-                const auto html = QString(R"(<p style="color:white;">%1<br></p>)").arg(bytes);
+                const auto html = QString(R"(<p style="color:black;">%1<br></p>)").arg(bytes);
                 mUI->logSerial->insertHtml(html);
             }
         } else {
@@ -272,11 +305,12 @@ void QTester::tryFetchingNewConnection() {
         if (not mPort) {
             return;
         }
-        mUI->logSerial->hasFocus();
+
         mPort->setBaudRate(115200);
         if (not mPort->open(QSerialPort::ReadWrite)) {
             mUI->statusBar->showMessage("failed to open valid port");
         } else {
+            mPort->setDataTerminalReady(true);
             mUI->logSerial->insertHtml(R"(<p style="color:pink;">~~NEW~CONNECTION~~<br></p>)");
             mUI->statusBar->showMessage(QString("%1 | %2").arg(
                 mPort->portName(),
