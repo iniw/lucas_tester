@@ -42,7 +42,7 @@ QTester::QTester(QWidget* parent)
         mUI->testPump,
         &QPushButton::pressed,
         this,
-        [this] { sendRawBufferToMachine("$L5 T0 S1$"); });
+        [this] { sendRawBufferToMachine(QString("$L5 T0 S1 V%1$").arg(mUI->pumpDigitalValue->value()).toLatin1()); });
 
     connect(
         mUI->testPump,
@@ -66,7 +66,7 @@ QTester::QTester(QWidget* parent)
         mUI->testBeeper,
         &QPushButton::pressed,
         this,
-        [this] { sendRawBufferToMachine("$L5 T6 S1$"); });
+        [this] { sendRawBufferToMachine(QString("$L5 T6 S1 V%1$").arg(mUI->beeperFrequency->value()).toLatin1()); });
 
     connect(
         mUI->testBeeper,
@@ -136,7 +136,7 @@ QTester::QTester(QWidget* parent)
         &QPushButton::clicked,
         this,
         [this] {
-            auto gcode = QString("$L5 T2 S%1$").arg(mUI->selectedStation->currentIndex());
+            auto gcode = QString("$L5 T2 V%1$").arg(mUI->selectedStation->currentIndex());
             sendRawBufferToMachine(gcode.toLatin1());
         });
 
@@ -145,10 +145,9 @@ QTester::QTester(QWidget* parent)
         &QPushButton::clicked,
         this,
         [this] {
-            auto gcode = QString("$L5 T3 S%1$").arg(mUI->selectedStation->currentIndex());
+            auto gcode = QString("$L5 T3 V%1$").arg(mUI->selectedStation->currentIndex());
             sendRawBufferToMachine(gcode.toLatin1());
         });
-
 }
 
 static bool isValidDelimiter(char c) {
@@ -236,7 +235,8 @@ void QTester::sendRawBufferToMachine(QByteArray bytes) {
     if (sentBytes == -1) {
         qDebug() << "falha ao enviar - [" << mPort->errorString() << "]";
     } else {
-        qDebug() << "enviados " << bytes.size() << "bytes";
+        qDebug() << "enviados " << bytes.size() << "bytes\n"
+                 << bytes;
     }
 }
 
