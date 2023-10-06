@@ -157,6 +157,10 @@ static bool isValidDelimiter(char c) {
 
 void QTester::interpretLineFromMachine(QByteArray bytes) {
     qDebug() << "received: " << bytes;
+
+    if (bytes.isEmpty())
+        return;
+
     if (bytes == "ok") { // ne segredo
         if (mFirmwareFile) {
             continueStreamingNewFirmware();
@@ -169,13 +173,13 @@ void QTester::interpretLineFromMachine(QByteArray bytes) {
 
         if (not isValidDelimiter(bytes.front())) {
             if (bytes.startsWith("ERRO:")) {
-                const auto html = QString(R"(<p style="color:crimson;">%1<span style="color:black;">%2<br></p>)").arg(bytes.first(5), bytes.sliced(5));
+                const auto html = QString(R"(<p style="color:crimson;">%1<span style="color:white;">%2<br></p>)").arg(bytes.first(5), bytes.sliced(5));
                 mUI->logSerial->insertHtml(html);
             } else if (isalpha(bytes[0]) and bytes[1] == ':') {
-                const auto html = QString(R"(<p style="color:skyblue;">%1<span style="color:black;">%2<br></p>)").arg(bytes.first(2), bytes.sliced(2));
+                const auto html = QString(R"(<p style="color:skyblue;">%1<span style="color:white;">%2<br></p>)").arg(bytes.first(2), bytes.sliced(2));
                 mUI->logSerial->insertHtml(html);
             } else {
-                const auto html = QString(R"(<p style="color:black;">%1<br></p>)").arg(bytes);
+                const auto html = QString(R"(<p style="color:white;">%1<br></p>)").arg(bytes);
                 mUI->logSerial->insertHtml(html);
             }
         } else {
