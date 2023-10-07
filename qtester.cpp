@@ -4,6 +4,7 @@
 #include <QDataStream>
 #include <QSerialPort>
 #include <QSerialPortInfo>
+#include <QLatin1StringView>
 #include <QTimer>
 #include <QScrollBar>
 #include <QKeyEvent>
@@ -148,6 +149,55 @@ QTester::QTester(QWidget* parent)
             auto gcode = QString("$L5 T3 V%1$").arg(mUI->selectedStation->currentIndex());
             sendRawBufferToMachine(gcode.toLatin1());
         });
+
+    connect(
+        mUI->pinCfg,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this] (int index) {
+            mUI->outputWidget->setDisabled(index != 0x1);
+        });
+
+    connect(
+        mUI->applyPinCfg,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            auto text = mUI->pinName->text();
+            if (text.isEmpty()
+                || text.size() < 3
+                || text.front() != 'P'
+                || (text[1] < 'A' || text[1] > 'E'))
+                return;
+
+            auto gcode = QString("$L4 Z3 ");
+            auto pin_number = [this] {
+                const auto latin1 = mUI->pinName->text().toLatin1();
+
+                bool ok;
+                const auto pin_id = latin1.sliced(2).toInt(&ok);
+                if (not ok || pin_id > 15)
+                    return -1;
+
+                const auto letter_number = latin1[1] - 'A';
+                return letter_number * 15 + letter_number + pin_id;
+            }();
+
+            if (pin_number == -1)
+                return;
+
+            gcode.append(QString("P%1 ").arg(std::lround(pin_number)));
+
+            const auto type = mUI->pinCfg->currentIndex();
+            gcode.append(QString("M%1 ").arg(type));
+
+            if (type == 0x1) { // OUTPUT
+                gcode.append(QString("V%1 ").arg(mUI->pinOutputValue->value()));
+            }
+
+            gcode.append('$');
+            sendRawBufferToMachine(gcode.toLatin1());
+        });
 }
 
 static bool isValidDelimiter(char c) {
@@ -184,7 +234,7 @@ void QTester::interpretLineFromMachine(QByteArray bytes) {
             }
         } else {
             const auto html = QString(R"(<p style="color:gray;">%1<br></p>)").arg(bytes);
-            mUI->logSerial->insertHtml(html);
+            // mUI->logSerial->insertHtml(html);
         }
 
         if (shouldScroll)
