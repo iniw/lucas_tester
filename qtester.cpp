@@ -150,27 +150,29 @@ QTester::QTester(QWidget* parent)
             sendRawBufferToMachine(gcode.toLatin1());
         });
 
+    const auto changePinCommandText = [this](int index) {
+        bool is_output = index == 0x1;
+        mUI->outputWidget->setEnabled(is_output);
+        mUI->sendPinCommand->setText(is_output ? "Enviar valor digital" : "Ler valor digital");
+    };
+
+    changePinCommandText(mUI->pinCfg->currentIndex());
     connect(
         mUI->pinCfg,
         &QComboBox::currentIndexChanged,
         this,
-        [this] (int index) {
-            mUI->outputWidget->setDisabled(index != 0x1);
-        });
+        changePinCommandText);
 
     connect(
-        mUI->applyPinCfg,
+        mUI->sendPinCommand,
         &QPushButton::clicked,
         this,
         [this] {
+            const bool is_output = mUI->pinCfg->currentIndex() == 0x1;
             auto text = mUI->pinName->text();
-            if (text.isEmpty()
-                || text.size() < 3
-                || text.front() != 'P'
-                || (text[1] < 'A' || text[1] > 'E'))
+            if (text.isEmpty() || text.size() < 3 || text.front() != 'P' || (text[1] < 'A' || text[1] > 'E'))
                 return;
 
-            auto gcode = QString("$L4 Z3 ");
             auto pin_number = [this] {
                 const auto latin1 = mUI->pinName->text().toLatin1();
 
@@ -186,17 +188,17 @@ QTester::QTester(QWidget* parent)
             if (pin_number == -1)
                 return;
 
-            gcode.append(QString("P%1 ").arg(pin_number));
-
-            const auto type = mUI->pinCfg->currentIndex();
-            gcode.append(QString("M%1 ").arg(type));
-
-            if (type == 0x1) { // OUTPUT
-                gcode.append(QString("V%1 ").arg(mUI->pinOutputValue->value()));
+            if (is_output) {
+                auto gcode = QString("$L4 Z3 P%1 M%2 V%3$")
+                                 .arg(pin_number)
+                                 .arg(mUI->pinCfg->currentIndex())
+                                 .arg(mUI->pinOutputValue->value());
+                sendRawBufferToMachine(gcode.toLatin1());
+            } else {
+                auto gcode = QString("$L4 Z4 P%1$")
+                                 .arg(pin_number);
+                sendRawBufferToMachine(gcode.toLatin1());
             }
-
-            gcode.append('$');
-            sendRawBufferToMachine(gcode.toLatin1());
         });
 }
 
