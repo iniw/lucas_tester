@@ -186,7 +186,7 @@ QTester::QTester(QWidget* parent)
             if (pin_number == -1)
                 return;
 
-            gcode.append(QString("P%1 ").arg(std::lround(pin_number)));
+            gcode.append(QString("P%1 ").arg(pin_number));
 
             const auto type = mUI->pinCfg->currentIndex();
             gcode.append(QString("M%1 ").arg(type));
