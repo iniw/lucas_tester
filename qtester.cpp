@@ -11,6 +11,10 @@
 #include <algorithm>
 #include <filesystem>
 
+#ifdef ANDROID
+    #include <QtCore/qjniobject.h>
+#endif
+
 constexpr auto FIRMWARE_PATH = "Robin_nano_V3.bin";
 constexpr auto MAX_BUFFER_SIZE = qsizetype(64);
 
@@ -20,6 +24,10 @@ QTester::QTester(QWidget* parent)
     , mUI(std::make_unique<Ui::QTester>())
     , mFirmwareFile(nullptr)
     , mFirmwareStream(nullptr) {
+    if (s_instance)
+        std::exit(1);
+
+    s_instance = this;
     mUI->setupUi(this);
     mUI->statusBar->showMessage("searching...");
 
@@ -43,7 +51,11 @@ QTester::QTester(QWidget* parent)
         mUI->testPump,
         &QPushButton::pressed,
         this,
-        [this] { sendRawBufferToMachine(QString("$L5 T0 S1 V%1$").arg(mUI->pumpDigitalValue->value()).toLatin1()); });
+        [this] {
+            auto gcode = QString("$L5 T0 S1 V%1$").arg(mUI->pumpDigitalValue->value());
+            qDebug() << gcode;
+            sendRawBufferToMachine(gcode.toLatin1());
+        });
 
     connect(
         mUI->testPump,
@@ -200,6 +212,22 @@ QTester::QTester(QWidget* parent)
                 sendRawBufferToMachine(gcode.toLatin1());
             }
         });
+
+#if ANDROID
+    mUI->flexButton->setText("Enviar comando");
+    connect(
+        mUI->flexButton,
+        &QPushButton::clicked,
+        this,
+        &QTester::sendUserInput);
+#else
+    mUI->flexButton->setText("Atualizar firmware");
+    connect(
+        mUI->flexButton,
+        &QPushButton::clicked,
+        this,
+        &QTester::startFirmwareUpdate);
+#endif
 }
 
 static bool isValidDelimiter(char c) {
@@ -213,7 +241,7 @@ void QTester::interpretLineFromMachine(QByteArray bytes) {
     if (bytes.isEmpty())
         return;
 
-    if (bytes == "ok") { // ne segredo
+    if (bytes == R"(#{"infoOther":{"okToReceive":true}}#)") { // ne segredo
         if (mFirmwareFile) {
             continueStreamingNewFirmware();
         } else {
@@ -226,28 +254,25 @@ void QTester::interpretLineFromMachine(QByteArray bytes) {
         if (not isValidDelimiter(bytes.front())) {
             if (bytes.startsWith("ERRO:")) {
                 const auto html = QString(R"(<p style="color:crimson;">%1<span style="color:white;">%2<br></p>)").arg(bytes.first(5), bytes.sliced(5));
-                mUI->logSerial->insertHtml(html);
+                QMetaObject::invokeMethod(mUI->logSerial, "insertHtml", Q_ARG(QString, html));
             } else if (isalpha(bytes[0]) and bytes[1] == ':') {
                 const auto html = QString(R"(<p style="color:skyblue;">%1<span style="color:white;">%2<br></p>)").arg(bytes.first(2), bytes.sliced(2));
-                mUI->logSerial->insertHtml(html);
+                QMetaObject::invokeMethod(mUI->logSerial, "insertHtml", Q_ARG(QString, html));
             } else {
                 const auto html = QString(R"(<p style="color:white;">%1<br></p>)").arg(bytes);
-                mUI->logSerial->insertHtml(html);
+                QMetaObject::invokeMethod(mUI->logSerial, "insertHtml", Q_ARG(QString, html));
             }
         } else {
             const auto html = QString(R"(<p style="color:gray;">%1<br></p>)").arg(bytes);
-            // mUI->logSerial->insertHtml(html);
+            QMetaObject::invokeMethod(mUI->logSerial, "insertHtml", Q_ARG(QString, html));
         }
 
         if (shouldScroll)
-            scrollbar->setValue(scrollbar->maximum());
+            QMetaObject::invokeMethod(scrollbar, "setValue", Q_ARG(int, scrollbar->maximum()));
     }
 }
 
 void QTester::sendUserInput() {
-    if (not mPort or not mPort->isOpen())
-        return;
-
     auto input = mUI->userInput->toPlainText().toLatin1();
     if (input.isEmpty())
         return;
@@ -281,10 +306,26 @@ void QTester::streamAndConsumeBuffer(QByteArray& buffer) {
 }
 
 void QTester::sendRawBufferToMachine(QByteArray bytes) {
-    if (not mPort or not mPort->isOpen())
+    if (bytes.isEmpty())
         return;
 
-    if (bytes.isEmpty())
+    if (not mFirmwareStream)
+        if (bytes.back() == '$' and bytes[bytes.size() - 2] != '\0')
+            bytes.insert(bytes.size() - 1, '\0');
+
+#ifdef ANDROID
+    QJniEnvironment env;
+    jbyteArray buffer = env->NewByteArray(bytes.size());
+    if (not buffer)
+        return;
+
+    env->SetByteArrayRegion(buffer, 0, bytes.size(), (jbyte const*)bytes.data());
+
+    QJniObject::callStaticMethod<void>("com/lucas/tester/Tester", "send", "([B)V", buffer);
+
+    env->DeleteLocalRef(buffer);
+#else
+    if (not mPort or not mPort->isOpen())
         return;
 
     const auto sentBytes = mPort->write(bytes);
@@ -294,6 +335,7 @@ void QTester::sendRawBufferToMachine(QByteArray bytes) {
         qDebug() << "enviados " << bytes.size() << "bytes\n"
                  << bytes;
     }
+#endif
 }
 
 void QTester::startFirmwareUpdate() {
@@ -341,6 +383,27 @@ void QTester::continueStreamingNewFirmware() {
     }
 }
 
+
+#ifdef ANDROID
+void QTester::onPortReady(JNIEnv* env, jobject, jbyteArray jdata) {
+    static QByteArray buffer = {};
+
+    jsize jdataSize = env->GetArrayLength(jdata);
+    if (jdataSize == 0)
+        return;
+
+    auto jelements = env->GetByteArrayElements(jdata, nullptr);
+    buffer.append((char const*)jelements, jdataSize);
+    env->ReleaseByteArrayElements(jdata, jelements, JNI_ABORT);
+
+    qsizetype i = buffer.indexOf('\n');
+    while (i != -1) {
+        QTester::the().interpretLineFromMachine(buffer.first(i));
+        buffer.remove(0, i + 1);
+        i = buffer.indexOf('\n');
+    }
+}
+#else
 void QTester::onPortReady() {
     if (not mPort || not mPort->isOpen())
         return;
@@ -348,8 +411,29 @@ void QTester::onPortReady() {
     while (mPort->canReadLine())
         interpretLineFromMachine(mPort->readLine().simplified());
 }
+#endif
 
 void QTester::tryFetchingNewConnection() {
+#ifdef ANDROID
+    static bool once = false;
+    if (once)
+        return;
+
+    once = true;
+    const JNINativeMethod methods[] = { "dataReceived", "([B)V", (void*)&QTester::onPortReady };
+    QJniEnvironment env;
+    env.registerNativeMethods("com/lucas/tester/TesterListener", methods, 1);
+
+    jboolean arg = false;
+    QJniObject::callStaticMethod<void>(
+        "com/lucas/tester/Tester",
+        "create",
+        "(Landroid/content/Context;Z)V",
+        QNativeInterface::QAndroidApplication::context(),
+        arg);
+
+    mUI->statusBar->showMessage("android :)");
+#else
     if (mPort) {
         if (not hasValidPort()) {
             mUI->statusBar->showMessage("lost connection");
@@ -374,6 +458,7 @@ void QTester::tryFetchingNewConnection() {
             QObject::connect(mPort.get(), &QSerialPort::readyRead, this, &QTester::onPortReady);
         }
     }
+#endif
 }
 
 bool QTester::eventFilter(QObject* object, QEvent* event) {

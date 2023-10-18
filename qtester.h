@@ -3,6 +3,9 @@
 #include <QMainWindow>
 #include <QByteArray>
 #include <memory>
+#ifdef ANDROID
+    #include <QJniEnvironment>
+#endif
 
 class QSerialPort;
 class QTimer;
@@ -23,6 +26,12 @@ public:
     QTester(QWidget* parent = nullptr);
     ~QTester();
 
+    static inline QTester* s_instance = nullptr;
+
+    static QTester& the() {
+        return *s_instance;
+    }
+
 private:
     bool eventFilter(QObject*, QEvent* event) override;
 
@@ -39,12 +48,17 @@ private:
     std::unique_ptr<QSerialPort> tryFindValidPort();
     bool hasValidPort();
 
+#ifdef ANDROID
+    static void javaDataReceived(JNIEnv* env, jobject thiz, jbyteArray data);
+    static void onPortReady(JNIEnv* env, jobject, jbyteArray jdata);
+#else
+    void onPortReady();
+#endif
+
 private slots:
     void startFirmwareUpdate();
 
     void tryFetchingNewConnection();
-
-    void onPortReady();
 
 private:
     QByteArray mUserInputBuffer = {};
