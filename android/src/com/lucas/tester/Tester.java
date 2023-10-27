@@ -74,6 +74,11 @@ public final class Tester {
         }
 
         if (foundDriver == null) {
+            mDriver = null;
+            mConnection = null;
+            mSerialPort = null;
+            mListener = null;
+            mIoManager = null;
             Log.e("Lucas", "Falha ao achar um driver legal");
             return;
         }

@@ -29,7 +29,7 @@ QTester::QTester(QWidget* parent)
 
     s_instance = this;
     mUI->setupUi(this);
-    mUI->statusBar->showMessage("searching...");
+    mUI->statusBar->showMessage("Procurando...");
 
     mUI->userInput->installEventFilter(this);
 
@@ -47,21 +47,25 @@ QTester::QTester(QWidget* parent)
         mUI->logSerial,
         &QTextEdit::clear);
 
+    const auto updatePumpText = [this] (bool state) {
+        mUI->testPump->setText((state ? "Desligar" : "Ligar") + QString(" Bomba"));
+    };
+
+    updatePumpText(false);
     connect(
         mUI->testPump,
-        &QPushButton::pressed,
+        &QPushButton::clicked,
         this,
-        [this] {
-            auto gcode = QString("$L5 T0 S1 V%1$").arg(mUI->pumpDigitalValue->value());
+        [this, updatePumpText] {
+            static bool s_state = true;
+
+            auto gcode = QString("$L5 T0 S%1 V%2$").arg(s_state).arg(mUI->pumpDigitalValue->value());
             qDebug() << gcode;
             sendRawBufferToMachine(gcode.toLatin1());
-        });
+            updatePumpText(s_state);
 
-    connect(
-        mUI->testPump,
-        &QPushButton::released,
-        this,
-        [this] { sendRawBufferToMachine("$L5 T0 S0$"); });
+            s_state = not s_state;
+        });
 
     connect(
         mUI->testResistance,
@@ -106,6 +110,15 @@ QTester::QTester(QWidget* parent)
         });
 
     connect(
+        mUI->heatUpWater,
+        &QCheckBox::clicked,
+        this,
+        [this] {
+            auto gcode = QString("$L5 T7 S%1$").arg(int(mUI->heatUpWater->isChecked()));
+            sendRawBufferToMachine(gcode.toLatin1());
+        });
+
+    connect(
         mUI->xAxisLeft,
         &QToolButton::clicked,
         this,
@@ -129,11 +142,22 @@ QTester::QTester(QWidget* parent)
         this,
         [this] { sendRawBufferToMachine("$G0 Y1$"); });
 
+    connect(
+        mUI->home,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            auto gcode = QString("$G28 XY$");
+            sendRawBufferToMachine(gcode.toLatin1());
+        });
+
     const auto changeLedText = [this](int index) {
-        auto str1 = QString("Testar LED do botão %1").arg(index + 1);
+        auto str1 = QString("Testar LED %1").arg(index + 1);
         auto str2 = QString("Testar PowerLED %1").arg(index + 1);
+        auto str3 = QString("Viajar Para %1").arg(index + 1);
         mUI->testButtonLed->setText(str1);
         mUI->testPowerLed->setText(str2);
+        mUI->travelToStation->setText(str3);
     };
 
     changeLedText(mUI->selectedStation->currentIndex());
@@ -162,10 +186,20 @@ QTester::QTester(QWidget* parent)
             sendRawBufferToMachine(gcode.toLatin1());
         });
 
+    connect(
+        mUI->travelToStation,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            auto gcode = QString("$L3 N%1$").arg(mUI->selectedStation->currentIndex());
+            sendRawBufferToMachine(gcode.toLatin1());
+        });
+
     const auto changePinCommandText = [this](int index) {
         bool is_output = index == 0x1;
-        mUI->outputWidget->setEnabled(is_output);
-        mUI->sendPinCommand->setText(is_output ? "Enviar valor digital" : "Ler valor digital");
+        mUI->pinOutputLabel->setEnabled(is_output);
+        mUI->pinOutputValue->setEnabled(is_output);
+        mUI->sendPinCommand->setText(is_output ? "Enviar Valor Digital" : "Ler Valor Digital");
     };
 
     changePinCommandText(mUI->pinCfg->currentIndex());
@@ -201,38 +235,47 @@ QTester::QTester(QWidget* parent)
                 return;
 
             if (is_output) {
-                auto gcode = QString("$L4 Z3 P%1 M%2 V%3$")
+                auto gcode = QString("$L4 Z4 P%1 M%2 V%3$")
                                  .arg(pin_number)
                                  .arg(mUI->pinCfg->currentIndex())
                                  .arg(mUI->pinOutputValue->value());
                 sendRawBufferToMachine(gcode.toLatin1());
             } else {
-                auto gcode = QString("$L4 Z4 P%1$")
+                auto gcode = QString("$L4 Z5 P%1$")
                                  .arg(pin_number);
                 sendRawBufferToMachine(gcode.toLatin1());
             }
         });
 
 #if ANDROID
-    mUI->flexButton->setText("Enviar comando");
+    mUI->flexButton->setText("Enviar Comando");
     connect(
         mUI->flexButton,
         &QPushButton::clicked,
         this,
         &QTester::sendUserInput);
 #else
-    mUI->flexButton->setText("Atualizar firmware");
+    mUI->flexButton->setText("Atualizar Firmware");
     connect(
         mUI->flexButton,
         &QPushButton::clicked,
         this,
         &QTester::startFirmwareUpdate);
+
 #endif
+
+    connect(
+        mUI->leaveTesterMode,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            auto gcode = QString("$L4 Z0$");
+            sendRawBufferToMachine(gcode.toLatin1());
+        });
 }
 
 static bool isValidDelimiter(char c) {
-    constexpr auto DELIMITERS = std::array<char, 2>{ '#', '$' };
-    return std::find(DELIMITERS.begin(), DELIMITERS.end(), c) != DELIMITERS.end();
+    return c == '#' || c == '$';
 }
 
 void QTester::interpretLineFromMachine(QByteArray bytes) {
@@ -298,9 +341,6 @@ void QTester::streamAndConsumeBuffer(QByteArray& buffer) {
 
     const auto sliceSize = std::min(MAX_BUFFER_SIZE, buffer.size());
     auto slicedBuffer = buffer.first(sliceSize);
-    if (slicedBuffer.back() == '$')
-        slicedBuffer.insert(slicedBuffer.size() - 1, '\0');
-
     sendRawBufferToMachine(slicedBuffer);
     buffer.remove(0, sliceSize);
 }
@@ -416,13 +456,12 @@ void QTester::onPortReady() {
 void QTester::tryFetchingNewConnection() {
 #ifdef ANDROID
     static bool once = false;
-    if (once)
-        return;
-
-    once = true;
-    const JNINativeMethod methods[] = { "dataReceived", "([B)V", (void*)&QTester::onPortReady };
-    QJniEnvironment env;
-    env.registerNativeMethods("com/lucas/tester/TesterListener", methods, 1);
+    if (not once) {
+        const JNINativeMethod methods[] = { "dataReceived", "([B)V", (void*)&QTester::onPortReady };
+        QJniEnvironment env;
+        env.registerNativeMethods("com/lucas/tester/TesterListener", methods, 1);
+        once = true;
+    }
 
     jboolean arg = false;
     QJniObject::callStaticMethod<void>(
@@ -432,7 +471,18 @@ void QTester::tryFetchingNewConnection() {
         QNativeInterface::QAndroidApplication::context(),
         arg);
 
-    mUI->statusBar->showMessage("android :)");
+    QJniObject jobj = QJniObject::getStaticObjectField("com/lucas/tester/Tester", "mSerialPort",
+                                                       "Lcom/hoho/android/usbserial/driver/UsbSerialPort;");
+    if (jobj.isValid()) {
+        if (mUI->statusBar->currentMessage() != "Conectado") {
+            mUI->logSerial->insertHtml(R"(<p style="color:pink;">~~NEW~CONNECTION~~<br></p>)");
+            mUI->statusBar->showMessage("Conectado");
+            sendRawBufferToMachine("$L4 Z0\nL4 K$");
+        }
+    } else {
+        mUI->statusBar->showMessage("Desconectado");
+    }
+
 #else
     if (mPort) {
         if (not hasValidPort()) {
