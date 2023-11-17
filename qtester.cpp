@@ -30,6 +30,7 @@ QTester::QTester(QWidget* parent)
     s_instance = this;
     mUI->setupUi(this);
     mUI->statusBar->showMessage("Procurando...");
+    mUI->logSerial->ensureCursorVisible();
 
     mUI->userInput->installEventFilter(this);
 
@@ -235,14 +236,15 @@ QTester::QTester(QWidget* parent)
                 return;
 
             if (is_output) {
-                auto gcode = QString("$L4 Z4 P%1 M%2 V%3$")
+                auto gcode = QString("$L6 P%1 M%2 V%3 W$")
                                  .arg(pin_number)
                                  .arg(mUI->pinCfg->currentIndex())
                                  .arg(mUI->pinOutputValue->value());
                 sendRawBufferToMachine(gcode.toLatin1());
             } else {
-                auto gcode = QString("$L4 Z5 P%1$")
-                                 .arg(pin_number);
+                auto gcode = QString("$L6 P%1 M%2 R$")
+                                 .arg(pin_number)
+                                 .arg(mUI->pinCfg->currentIndex());
                 sendRawBufferToMachine(gcode.toLatin1());
             }
         });
@@ -269,8 +271,7 @@ QTester::QTester(QWidget* parent)
         &QPushButton::clicked,
         this,
         [this] {
-            auto gcode = QString("$L4 Z0$");
-            sendRawBufferToMachine(gcode.toLatin1());
+            sendRawBufferToMachine("$L4 K0$");
         });
 }
 
@@ -477,7 +478,7 @@ void QTester::tryFetchingNewConnection() {
         if (mUI->statusBar->currentMessage() != "Conectado") {
             mUI->logSerial->insertHtml(R"(<p style="color:pink;">~~NEW~CONNECTION~~<br></p>)");
             mUI->statusBar->showMessage("Conectado");
-            sendRawBufferToMachine("$L4 Z0\nL4 K$");
+            sendRawBufferToMachine("$L4 K1$");
         }
     } else {
         mUI->statusBar->showMessage("Desconectado");
