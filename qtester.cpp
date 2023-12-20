@@ -303,7 +303,9 @@ void QTester::interpretLineFromMachine(QByteArray bytes) {
                 const auto html = QString(R"(<p style="color:skyblue;">%1<span style="color:white;">%2<br></p>)").arg(bytes.first(2), bytes.sliced(2));
                 QMetaObject::invokeMethod(mUI->logSerial, "insertHtml", Q_ARG(QString, html));
             } else {
-                const auto html = QString(R"(<p style="color:white;">%1<br></p>)").arg(bytes);
+                const auto color = QApplication::palette().text().color().name(QColor::HexRgb);
+                qDebug() << color;
+                const auto html = QString(R"(<p style="color:%1;">%2<br></p>)").arg(color).arg(bytes);
                 QMetaObject::invokeMethod(mUI->logSerial, "insertHtml", Q_ARG(QString, html));
             }
         } else {
@@ -325,7 +327,7 @@ void QTester::sendUserInput() {
         qDebug() << "cade o delimitador";
         mUI->userInput->clear();
         return;
-    }
+    }    
 
     if (input.back() != input.front())
         input.push_back(input.front());
