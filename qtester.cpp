@@ -68,17 +68,25 @@ QTester::QTester(QWidget* parent)
             s_state = not s_state;
         });
 
-    connect(
-        mUI->testResistance,
-        &QPushButton::pressed,
-        this,
-        [this] { sendRawBufferToMachine("$L5 T1 S1$"); });
+    const auto updateResistanceText = [this] (bool state) {
+        mUI->testResistance->setText((state ? "Desligar" : "Ligar") + QString(" Resistência"));
+    };
 
+    updateResistanceText(false);
     connect(
         mUI->testResistance,
-        &QPushButton::released,
+        &QPushButton::clicked,
         this,
-        [this] { sendRawBufferToMachine("$L5 T1 S0$"); });
+        [this, updateResistanceText] {
+            static bool s_state = true;
+
+            auto gcode = QString("$L5 T1 S%1$").arg(s_state);
+            qDebug() << gcode;
+            sendRawBufferToMachine(gcode.toLatin1());
+            updateResistanceText(s_state);
+
+            s_state = not s_state;
+        });
 
     connect(
         mUI->testBeeper,

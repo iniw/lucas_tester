@@ -115,7 +115,7 @@
        <enum>QTabWidget::Rounded</enum>
       </property>
       <property name="currentIndex">
-       <number>0</number>
+       <number>2</number>
       </property>
       <property name="elideMode">
        <enum>Qt::ElideNone</enum>
@@ -799,7 +799,7 @@
            </sizepolicy>
           </property>
           <property name="maximum">
-           <number>4095</number>
+           <number>255</number>
           </property>
           <property name="orientation">
            <enum>Qt::Horizontal</enum>
@@ -901,7 +901,7 @@
            </sizepolicy>
           </property>
           <property name="text">
-           <string>Valor do Output [0-4095]:</string>
+           <string>Valor do Output [0-255]:</string>
           </property>
          </widget>
         </item>
