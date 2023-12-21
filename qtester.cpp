@@ -83,15 +83,14 @@ QTester::QTester(QWidget* parent)
             resistances[i],
             &QPushButton::clicked,
             this,
-            [&, index = i] {
-                static bool s_state = true;
+            [&, index = i, state = true] () mutable {
 
-                auto gcode = QString("$L6 P%1 M1 V%2 W$").arg(resistancesPins[index]).arg(s_state ? resistancesPwm[index]->value() : 0);
+                auto gcode = QString("$L6 P%1 M1 V%2 W$").arg(resistancesPins[index]).arg(state ? resistancesPwm[index]->value() : 0);
                 qDebug() << gcode;
                 sendRawBufferToMachine(gcode.toLatin1());
-                updateResistanceText(resistances[index], resistancesNames[index], s_state);
+                updateResistanceText(resistances[index], resistancesNames[index], state);
 
-                s_state = not s_state;
+                state = not state;
             });
     }
 
