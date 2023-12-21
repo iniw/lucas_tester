@@ -296,15 +296,14 @@ void QTester::interpretLineFromMachine(QByteArray bytes) {
         bool shouldScroll = scrollbar and scrollbar->value() == scrollbar->maximum();
 
         if (not isValidDelimiter(bytes.front())) {
+            const auto color = QApplication::palette().text().color().name(QColor::HexRgb);
             if (bytes.startsWith("ERRO:")) {
-                const auto html = QString(R"(<p style="color:crimson;">%1<span style="color:white;">%2<br></p>)").arg(bytes.first(5), bytes.sliced(5));
+                const auto html = QString(R"(<p style="color:crimson;">%1<span style="color:%2;">%3<br></p>)").arg(bytes.first(5), color, bytes.sliced(5));
                 QMetaObject::invokeMethod(mUI->logSerial, "insertHtml", Q_ARG(QString, html));
             } else if (isalpha(bytes[0]) and bytes[1] == ':') {
-                const auto html = QString(R"(<p style="color:skyblue;">%1<span style="color:white;">%2<br></p>)").arg(bytes.first(2), bytes.sliced(2));
+                const auto html = QString(R"(<p style="color:skyblue;">%1<span style="color:%2;">%3<br></p>)").arg(bytes.first(2), color, bytes.sliced(2));
                 QMetaObject::invokeMethod(mUI->logSerial, "insertHtml", Q_ARG(QString, html));
             } else {
-                const auto color = QApplication::palette().text().color().name(QColor::HexRgb);
-                qDebug() << color;
                 const auto html = QString(R"(<p style="color:%1;">%2<br></p>)").arg(color).arg(bytes);
                 QMetaObject::invokeMethod(mUI->logSerial, "insertHtml", Q_ARG(QString, html));
             }
