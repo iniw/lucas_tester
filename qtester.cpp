@@ -68,25 +68,32 @@ QTester::QTester(QWidget* parent)
             s_state = not s_state;
         });
 
-    const auto updateResistanceText = [this] (bool state) {
-        mUI->testResistance->setText((state ? "Desligar" : "Ligar") + QString(" Resistência"));
+    static auto resistances = std::array{ mUI->testResistance1, mUI->testResistance2, mUI->testResistance3 };
+    static auto resistancesPins = std::array{ 69, 16, 0 };
+    static auto resistancesPwm = std::array{ mUI->testResistancePwm1, mUI->testResistancePwm2, mUI->testResistancePwm3 };
+    static auto resistancesNames = std::array{ QString("TH0"), QString("TH1"), QString("Bed") };
+
+    const auto updateResistanceText = [this] (QPushButton* resistance, QString name, bool state) {
+        resistance->setText((state ? "Desligar " : "Ligar ") + name);
     };
 
-    updateResistanceText(false);
-    connect(
-        mUI->testResistance,
-        &QPushButton::clicked,
-        this,
-        [this, updateResistanceText] {
-            static bool s_state = true;
+    for (int i = 0; i < 3; ++i) {
+        updateResistanceText(resistances[i], resistancesNames[i], false);
+        connect(
+            resistances[i],
+            &QPushButton::clicked,
+            this,
+            [&, index = i] {
+                static bool s_state = true;
 
-            auto gcode = QString("$L5 T1 S%1$").arg(s_state);
-            qDebug() << gcode;
-            sendRawBufferToMachine(gcode.toLatin1());
-            updateResistanceText(s_state);
+                auto gcode = QString("$L6 P%1 M1 V%2 W$").arg(resistancesPins[index]).arg(s_state ? resistancesPwm[index]->value() : 0);
+                qDebug() << gcode;
+                sendRawBufferToMachine(gcode.toLatin1());
+                updateResistanceText(resistances[index], resistancesNames[index], s_state);
 
-            s_state = not s_state;
-        });
+                s_state = not s_state;
+            });
+    }
 
     connect(
         mUI->testBeeper,
