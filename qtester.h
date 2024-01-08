@@ -12,6 +12,8 @@ class QTimer;
 class QFile;
 class QDataStream;
 class QKeyEvent;
+class QBluetoothSocket;
+class QBluetoothDeviceDiscoveryAgent;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -45,27 +47,20 @@ private:
 
     void sendUserInput();
 
-    std::unique_ptr<QSerialPort> tryFindValidPort();
-    bool hasValidPort();
-
-#ifdef ANDROID
-    static void javaDataReceived(JNIEnv* env, jobject thiz, jbyteArray data);
-    static void onPortReady(JNIEnv* env, jobject, jbyteArray jdata);
-#else
     void onPortReady();
-#endif
+
+    void searchForDevice();
 
 private slots:
     void startFirmwareUpdate();
 
-    void tryFetchingNewConnection();
-
 private:
     QByteArray mUserInputBuffer = {};
 
-    std::unique_ptr<QSerialPort> mPort;
-    std::unique_ptr<QTimer> mTimer;
     std::unique_ptr<Ui::QTester> mUI;
+
+    std::unique_ptr<QBluetoothSocket> mSocket;
+    std::unique_ptr<QBluetoothDeviceDiscoveryAgent> mDiscoveryAgent;
 
     std::unique_ptr<QFile> mFirmwareFile;
     std::unique_ptr<QDataStream> mFirmwareStream;

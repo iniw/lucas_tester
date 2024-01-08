@@ -2,26 +2,23 @@
 #include "ui_qtester.h"
 #include <QFile>
 #include <QDataStream>
-#include <QSerialPort>
-#include <QSerialPortInfo>
 #include <QLatin1StringView>
-#include <QTimer>
 #include <QScrollBar>
 #include <QKeyEvent>
 #include <algorithm>
 #include <filesystem>
-
-#ifdef ANDROID
-    #include <QtCore/qjniobject.h>
-#endif
+#include <QBluetoothSocket>
+#include <QBluetoothDeviceDiscoveryAgent>
+#include <QBluetoothDeviceInfo>
 
 constexpr auto FIRMWARE_PATH = "Robin_nano_V3.bin";
-constexpr auto MAX_BUFFER_SIZE = qsizetype(64);
+constexpr auto MAX_BUFFER_SIZE = qsizetype(256);
 
 QTester::QTester(QWidget* parent)
     : QMainWindow(parent)
-    , mTimer(std::make_unique<QTimer>(this))
     , mUI(std::make_unique<Ui::QTester>())
+    , mDiscoveryAgent(std::make_unique<QBluetoothDeviceDiscoveryAgent>())
+    , mSocket(std::make_unique<QBluetoothSocket>(QBluetoothServiceInfo::RfcommProtocol))
     , mFirmwareFile(nullptr)
     , mFirmwareStream(nullptr) {
     if (s_instance)
@@ -31,16 +28,48 @@ QTester::QTester(QWidget* parent)
     mUI->setupUi(this);
     mUI->statusBar->showMessage("Procurando...");
     mUI->logSerial->ensureCursorVisible();
-
     mUI->userInput->installEventFilter(this);
 
-    connect(
-        mTimer.get(),
-        &QTimer::timeout,
-        this,
-        &QTester::tryFetchingNewConnection);
+    connect(mDiscoveryAgent.get(), &QBluetoothDeviceDiscoveryAgent::deviceDiscovered, this, [&](const QBluetoothDeviceInfo& info) {
+        if (info.name() == "LUCAS_BT") {
+            mUI->statusBar->showMessage("Conectando - " + info.name());
+            mSocket->connectToService(info.address(), info.deviceUuid());
+        }
+    });
 
-    mTimer->start(1000);
+    connect(mDiscoveryAgent.get(), &QBluetoothDeviceDiscoveryAgent::errorOccurred, this, [&] (QBluetoothDeviceDiscoveryAgent::Error error) {
+        // FIXME: handle the error
+        mUI->statusBar->showMessage(QString("Erro na descoberta - %0 [%1]").arg(mDiscoveryAgent->errorString()).arg((int)mDiscoveryAgent->error()));
+        searchForDevice();
+    });
+
+    connect(mDiscoveryAgent.get(), &QBluetoothDeviceDiscoveryAgent::finished, this, [&] {
+        switch (mSocket->state()) {
+            case QBluetoothSocket::SocketState::ConnectedState:
+            case QBluetoothSocket::SocketState::ConnectingState:
+                qDebug() << "discovery finshed";
+                break;
+            default:
+                searchForDevice();
+        }
+    });
+
+    connect(mSocket.get(), &QBluetoothSocket::connected, this, [&] {
+        mUI->statusBar->showMessage("Conectado - " + mSocket->peerName());
+        mDiscoveryAgent->stop();
+    });
+
+    connect(mSocket.get(), &QBluetoothSocket::disconnected, this, [&] {
+        mUI->statusBar->showMessage("Desconectado");
+        searchForDevice();
+    });
+
+    connect(mSocket.get(), &QBluetoothSocket::errorOccurred, this, [&] (QBluetoothSocket::SocketError error) {
+        mUI->statusBar->showMessage(QString("Erro no socket - %0 [%1]").arg(mSocket->errorString()).arg((int)mSocket->error()));
+        // searchForDevice();
+    });
+
+    connect(mSocket.get(), &QBluetoothSocket::readyRead, this, &QTester::onPortReady);
 
     connect(
         mUI->clearLogSerial,
@@ -287,6 +316,8 @@ QTester::QTester(QWidget* parent)
         [this] {
             sendRawBufferToMachine("$L4 K0$");
         });
+
+    searchForDevice();
 }
 
 static bool isValidDelimiter(char c) {
@@ -369,33 +400,20 @@ void QTester::sendRawBufferToMachine(QByteArray bytes) {
         if (bytes.back() == '$' and bytes[bytes.size() - 2] != '\0')
             bytes.insert(bytes.size() - 1, '\0');
 
-#ifdef ANDROID
-    QJniEnvironment env;
-    jbyteArray buffer = env->NewByteArray(bytes.size());
-    if (not buffer)
+    if (mSocket->state() != QBluetoothSocket::SocketState::ConnectedState)
         return;
 
-    env->SetByteArrayRegion(buffer, 0, bytes.size(), (jbyte const*)bytes.data());
-
-    QJniObject::callStaticMethod<void>("com/lucas/tester/Tester", "send", "([B)V", buffer);
-
-    env->DeleteLocalRef(buffer);
-#else
-    if (not mPort or not mPort->isOpen())
-        return;
-
-    const auto sentBytes = mPort->write(bytes);
+    const auto sentBytes = mSocket->write(bytes);
     if (sentBytes == -1) {
-        qDebug() << "falha ao enviar - [" << mPort->errorString() << "]";
+        qDebug() << "falha ao enviar - [" << mSocket->errorString() << "]";
     } else {
         qDebug() << "enviados " << bytes.size() << "bytes\n"
                  << bytes;
     }
-#endif
 }
 
 void QTester::startFirmwareUpdate() {
-    if (not mPort or not mPort->isOpen())
+    if (mSocket->state() != QBluetoothSocket::SocketState::ConnectedState)
         return;
 
     if (not std::filesystem::exists(FIRMWARE_PATH)) {
@@ -440,91 +458,16 @@ void QTester::continueStreamingNewFirmware() {
 }
 
 
-#ifdef ANDROID
-void QTester::onPortReady(JNIEnv* env, jobject, jbyteArray jdata) {
-    static QByteArray buffer = {};
-
-    jsize jdataSize = env->GetArrayLength(jdata);
-    if (jdataSize == 0)
-        return;
-
-    auto jelements = env->GetByteArrayElements(jdata, nullptr);
-    buffer.append((char const*)jelements, jdataSize);
-    env->ReleaseByteArrayElements(jdata, jelements, JNI_ABORT);
-
-    qsizetype i = buffer.indexOf('\n');
-    while (i != -1) {
-        QTester::the().interpretLineFromMachine(buffer.first(i));
-        buffer.remove(0, i + 1);
-        i = buffer.indexOf('\n');
-    }
-}
-#else
 void QTester::onPortReady() {
-    if (not mPort || not mPort->isOpen())
-        return;
-
-    while (mPort->canReadLine())
-        interpretLineFromMachine(mPort->readLine().simplified());
+    qDebug() << "ready to read";
+    while (mSocket->canReadLine())
+        interpretLineFromMachine(mSocket->readLine().simplified());
 }
-#endif
 
-void QTester::tryFetchingNewConnection() {
-#ifdef ANDROID
-    static bool once = false;
-    if (not once) {
-        const JNINativeMethod methods[] = { "dataReceived", "([B)V", (void*)&QTester::onPortReady };
-        QJniEnvironment env;
-        env.registerNativeMethods("com/lucas/tester/TesterListener", methods, 1);
-        once = true;
-    }
-
-    jboolean arg = false;
-    QJniObject::callStaticMethod<void>(
-        "com/lucas/tester/Tester",
-        "create",
-        "(Landroid/content/Context;Z)V",
-        QNativeInterface::QAndroidApplication::context(),
-        arg);
-
-    QJniObject jobj = QJniObject::getStaticObjectField("com/lucas/tester/Tester", "mSerialPort",
-                                                       "Lcom/hoho/android/usbserial/driver/UsbSerialPort;");
-    if (jobj.isValid()) {
-        if (mUI->statusBar->currentMessage() != "Conectado") {
-            mUI->logSerial->insertHtml(R"(<p style="color:pink;">~~NEW~CONNECTION~~<br></p>)");
-            mUI->statusBar->showMessage("Conectado");
-            sendRawBufferToMachine("$L4 K1$");
-        }
-    } else {
-        mUI->statusBar->showMessage("Desconectado");
-    }
-
-#else
-    if (mPort) {
-        if (not hasValidPort()) {
-            mUI->statusBar->showMessage("lost connection");
-            mPort = nullptr;
-        }
-    } else {
-        mUI->statusBar->showMessage("searching...");
-        mPort = tryFindValidPort();
-        if (not mPort) {
-            return;
-        }
-
-        mPort->setBaudRate(115200);
-        if (not mPort->open(QSerialPort::ReadWrite)) {
-            mUI->statusBar->showMessage("failed to open valid port");
-        } else {
-            mPort->setDataTerminalReady(true);
-            mUI->logSerial->insertHtml(R"(<p style="color:pink;">~~NEW~CONNECTION~~<br></p>)");
-            mUI->statusBar->showMessage(QString("%1 | %2").arg(
-                mPort->portName(),
-                QString::number(mPort->baudRate())));
-            QObject::connect(mPort.get(), &QSerialPort::readyRead, this, &QTester::onPortReady);
-        }
-    }
-#endif
+void QTester::searchForDevice() {
+    if (mDiscoveryAgent->isActive())
+        mDiscoveryAgent->stop();
+    mDiscoveryAgent->start(QBluetoothDeviceDiscoveryAgent::ClassicMethod);
 }
 
 bool QTester::eventFilter(QObject* object, QEvent* event) {
@@ -537,36 +480,6 @@ bool QTester::eventFilter(QObject* object, QEvent* event) {
 
     sendUserInput();
     return true;
-}
-
-template<typename FN>
-static void findValidPort(FN callback) {
-    auto list = QSerialPortInfo::availablePorts();
-    if (list.empty())
-        return;
-
-    for (auto& portInfo : list) {
-        if (portInfo.vendorIdentifier() == 1155) {
-            callback(portInfo);
-            return;
-        }
-    }
-}
-
-std::unique_ptr<QSerialPort> QTester::tryFindValidPort() {
-    std::unique_ptr<QSerialPort> port = nullptr;
-    findValidPort([&port, this](auto& portInfo) {
-        port = std::make_unique<QSerialPort>(portInfo, this);
-    });
-    return port;
-}
-
-bool QTester::hasValidPort() {
-    bool found = false;
-    findValidPort([&found](auto& portInfo) {
-        found = true;
-    });
-    return found;
 }
 
 QTester::~QTester() = default;
