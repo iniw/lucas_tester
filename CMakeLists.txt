@@ -9,8 +9,8 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Widgets SerialPort Bluetooth)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Widgets SerialPort Bluetooth)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core Widgets Bluetooth)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Widgets Bluetooth)
 
 set(PROJECT_SOURCES
     main.cpp
@@ -24,14 +24,12 @@ qt_add_executable(LucasTester
     ${PROJECT_SOURCES}
 )
 
-set_property(TARGET LucasTester APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/android)
 set_property(TARGET LucasTester PROPERTY QT_ANDROID_TARGET_SDK_VERSION 33)
 set_property(TARGET LucasTester PROPERTY QT_ANDROID_MIN_SDK_VERSION 29)
 
 target_link_libraries(LucasTester PRIVATE
     Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Widgets
-    Qt${QT_VERSION_MAJOR}::SerialPort
     Qt${QT_VERSION_MAJOR}::Bluetooth
 )
 

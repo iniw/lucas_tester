@@ -19,7 +19,6 @@ apply plugin: 'com.android.application'
 
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
-    implementation 'com.github.mik3y:usb-serial-for-android:3.5.1'
 }
 
 android {

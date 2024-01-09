@@ -6,44 +6,51 @@
 #include <QScrollBar>
 #include <QKeyEvent>
 #include <algorithm>
-#include <filesystem>
 #include <QBluetoothSocket>
 #include <QBluetoothDeviceDiscoveryAgent>
 #include <QBluetoothDeviceInfo>
+#include <QBluetoothLocalDevice>
 
-constexpr auto FIRMWARE_PATH = "Robin_nano_V3.bin";
 constexpr auto MAX_BUFFER_SIZE = qsizetype(256);
 
 QTester::QTester(QWidget* parent)
     : QMainWindow(parent)
     , mUI(std::make_unique<Ui::QTester>())
-    , mDiscoveryAgent(std::make_unique<QBluetoothDeviceDiscoveryAgent>())
-    , mSocket(std::make_unique<QBluetoothSocket>(QBluetoothServiceInfo::RfcommProtocol))
+    , mDiscoveryAgent(new QBluetoothDeviceDiscoveryAgent(this))
+    , mLocalDevice(new QBluetoothLocalDevice(this))
+    , mSocket(new QBluetoothSocket(QBluetoothServiceInfo::RfcommProtocol, this))
     , mFirmwareFile(nullptr)
     , mFirmwareStream(nullptr) {
-    if (s_instance)
-        std::exit(1);
-
-    s_instance = this;
     mUI->setupUi(this);
-    mUI->statusBar->showMessage("Procurando...");
     mUI->logSerial->ensureCursorVisible();
     mUI->userInput->installEventFilter(this);
 
-    connect(mDiscoveryAgent.get(), &QBluetoothDeviceDiscoveryAgent::deviceDiscovered, this, [&](const QBluetoothDeviceInfo& info) {
+    if (!mLocalDevice->isValid()) {
+        mUI->statusBar->showMessage("Bluetooth não está disponível :(");
+        return;
+    }
+
+    connect(mDiscoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered, this, [&](const QBluetoothDeviceInfo& info) {
         if (info.name() == "LUCAS_BT") {
-            mUI->statusBar->showMessage("Conectando - " + info.name());
-            mSocket->connectToService(info.address(), info.deviceUuid());
+            mUI->statusBar->showMessage("Conectando...");
+
+            // TODO: confirm that this UUID is the same for all esp32 modules (i'm fairy certain it is)
+            mSocket->connectToService(info.address(), QBluetoothUuid("00001101-0000-1000-8000-00805F9B34FB"));
         }
     });
 
-    connect(mDiscoveryAgent.get(), &QBluetoothDeviceDiscoveryAgent::errorOccurred, this, [&] (QBluetoothDeviceDiscoveryAgent::Error error) {
-        // FIXME: handle the error
+    connect(mDiscoveryAgent, &QBluetoothDeviceDiscoveryAgent::errorOccurred, this, [&] (QBluetoothDeviceDiscoveryAgent::Error error) {
         mUI->statusBar->showMessage(QString("Erro na descoberta - %0 [%1]").arg(mDiscoveryAgent->errorString()).arg((int)mDiscoveryAgent->error()));
+        // error when discovering devices, could be because of a sudden disconnection
+        // for now just ignore it and search again
+        // FIXME: handle the error?
         searchForDevice();
     });
 
-    connect(mDiscoveryAgent.get(), &QBluetoothDeviceDiscoveryAgent::finished, this, [&] {
+    connect(mDiscoveryAgent, &QBluetoothDeviceDiscoveryAgent::finished, this, [&] {
+        // the search has finished!
+        // if we are connected or in the process of connecting don't do anything
+        // otherwise search again
         switch (mSocket->state()) {
             case QBluetoothSocket::SocketState::ConnectedState:
             case QBluetoothSocket::SocketState::ConnectingState:
@@ -54,28 +61,23 @@ QTester::QTester(QWidget* parent)
         }
     });
 
-    connect(mSocket.get(), &QBluetoothSocket::connected, this, [&] {
+    connect(mSocket, &QBluetoothSocket::connected, this, [&] {
         mUI->statusBar->showMessage("Conectado - " + mSocket->peerName());
-        mDiscoveryAgent->stop();
     });
 
-    connect(mSocket.get(), &QBluetoothSocket::disconnected, this, [&] {
+    connect(mSocket, &QBluetoothSocket::disconnected, this, [&] {
         mUI->statusBar->showMessage("Desconectado");
         searchForDevice();
     });
 
-    connect(mSocket.get(), &QBluetoothSocket::errorOccurred, this, [&] (QBluetoothSocket::SocketError error) {
-        mUI->statusBar->showMessage(QString("Erro no socket - %0 [%1]").arg(mSocket->errorString()).arg((int)mSocket->error()));
-        // searchForDevice();
+    connect(mSocket, &QBluetoothSocket::errorOccurred, this, [&] (QBluetoothSocket::SocketError error) {
+        mUI->statusBar->showMessage(QString("Erro na socket - %0 [%1]").arg(mSocket->errorString()).arg((int)mSocket->error()));
+        searchForDevice();
     });
 
-    connect(mSocket.get(), &QBluetoothSocket::readyRead, this, &QTester::onPortReady);
+    connect(mSocket, &QBluetoothSocket::readyRead, this, &QTester::onSocketReady);
 
-    connect(
-        mUI->clearLogSerial,
-        &QPushButton::clicked,
-        mUI->logSerial,
-        &QTextEdit::clear);
+    connect(mUI->clearLogSerial, &QPushButton::clicked, mUI->logSerial, &QTextEdit::clear);
 
     const auto updatePumpText = [this] (bool state) {
         mUI->testPump->setText((state ? "Desligar" : "Ligar") + QString(" Bomba"));
@@ -292,21 +294,20 @@ QTester::QTester(QWidget* parent)
             }
         });
 
-#if ANDROID
-    mUI->flexButton->setText("Enviar Comando");
-    connect(
-        mUI->flexButton,
-        &QPushButton::clicked,
-        this,
-        &QTester::sendUserInput);
-#else
+#ifndef ANDROID
     mUI->flexButton->setText("Atualizar Firmware");
     connect(
         mUI->flexButton,
         &QPushButton::clicked,
         this,
         &QTester::startFirmwareUpdate);
-
+#else
+    mUI->flexButton->setText("Enviar Comando");
+    connect(
+        mUI->flexButton,
+        &QPushButton::clicked,
+        this,
+        &QTester::sendUserInput);
 #endif
 
     connect(
@@ -317,6 +318,7 @@ QTester::QTester(QWidget* parent)
             sendRawBufferToMachine("$L4 K0$");
         });
 
+    mUI->statusBar->showMessage("Procurando...");
     searchForDevice();
 }
 
@@ -416,22 +418,18 @@ void QTester::startFirmwareUpdate() {
     if (mSocket->state() != QBluetoothSocket::SocketState::ConnectedState)
         return;
 
-    if (not std::filesystem::exists(FIRMWARE_PATH)) {
-        qDebug() << "novo firmware nao foi encontrado";
+    constexpr auto FIRMWARE_PATH = "Robin_nano_V3.bin";
+    mFirmwareFile = new QFile(FIRMWARE_PATH, this);
+    if (mFirmwareFile->error()) {
+        qDebug() << "ERRO: " << mFirmwareFile->errorString();
+        delete mFirmwareFile;
         return;
     }
 
-    const auto size = std::filesystem::file_size(FIRMWARE_PATH);
-    if (size == 0) {
-        qDebug() << "novo firmware esta vazio";
-        return;
-    }
-
-    mFirmwareFile = std::make_unique<QFile>(FIRMWARE_PATH);
     mFirmwareFile->open(QFile::ReadOnly);
-    mFirmwareStream = std::make_unique<QDataStream>(mFirmwareFile.get());
+    mFirmwareStream = new QDataStream(mFirmwareFile);
 
-    auto command = QString("#{\"cmdFirmwareUpdate\":%1}#").arg(QString::number(size)).toLatin1();
+    auto command = QString("#{\"cmdFirmwareUpdate\":%1}#").arg(QString::number(mFirmwareFile->size())).toLatin1();
     sendRawBufferToMachine(command);
 }
 
@@ -441,8 +439,8 @@ void QTester::continueStreamingNewFirmware() {
 
     const auto bytesRead = mFirmwareStream->readRawData(buffer.data(), MAX_BUFFER_SIZE);
     if (bytesRead == -1) {
-        mFirmwareStream = nullptr;
-        mFirmwareFile = nullptr;
+        delete mFirmwareStream;
+        delete mFirmwareFile;
         qDebug() << "erro no envio";
         return;
     }
@@ -451,14 +449,13 @@ void QTester::continueStreamingNewFirmware() {
     sendRawBufferToMachine(buffer);
 
     if (mFirmwareStream->atEnd()) {
-        mFirmwareStream = nullptr;
-        mFirmwareFile = nullptr;
+        delete mFirmwareStream;
+        delete mFirmwareFile;
         qDebug() << "fim do envio";
     }
 }
 
-
-void QTester::onPortReady() {
+void QTester::onSocketReady() {
     qDebug() << "ready to read";
     while (mSocket->canReadLine())
         interpretLineFromMachine(mSocket->readLine().simplified());

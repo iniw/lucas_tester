@@ -2,10 +2,6 @@
 
 #include <QMainWindow>
 #include <QByteArray>
-#include <memory>
-#ifdef ANDROID
-    #include <QJniEnvironment>
-#endif
 
 class QSerialPort;
 class QTimer;
@@ -14,6 +10,7 @@ class QDataStream;
 class QKeyEvent;
 class QBluetoothSocket;
 class QBluetoothDeviceDiscoveryAgent;
+class QBluetoothLocalDevice;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -28,18 +25,8 @@ public:
     QTester(QWidget* parent = nullptr);
     ~QTester();
 
-    static inline QTester* s_instance = nullptr;
-
-    static QTester& the() {
-        return *s_instance;
-    }
-
 private:
-    bool eventFilter(QObject*, QEvent* event) override;
-
     void interpretLineFromMachine(QByteArray);
-
-    void continueStreamingNewFirmware();
 
     void sendRawBufferToMachine(QByteArray);
 
@@ -47,9 +34,13 @@ private:
 
     void sendUserInput();
 
-    void onPortReady();
+    void onSocketReady();
 
     void searchForDevice();
+
+    void continueStreamingNewFirmware();
+
+    bool eventFilter(QObject*, QEvent*) override;
 
 private slots:
     void startFirmwareUpdate();
@@ -59,9 +50,10 @@ private:
 
     std::unique_ptr<Ui::QTester> mUI;
 
-    std::unique_ptr<QBluetoothSocket> mSocket;
-    std::unique_ptr<QBluetoothDeviceDiscoveryAgent> mDiscoveryAgent;
+    QBluetoothSocket* mSocket;
+    QBluetoothDeviceDiscoveryAgent* mDiscoveryAgent;
+    QBluetoothLocalDevice* mLocalDevice;
 
-    std::unique_ptr<QFile> mFirmwareFile;
-    std::unique_ptr<QDataStream> mFirmwareStream;
+    QFile* mFirmwareFile;
+    QDataStream* mFirmwareStream;
 };
