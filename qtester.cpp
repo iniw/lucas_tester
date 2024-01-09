@@ -30,16 +30,18 @@ QTester::QTester(QWidget* parent)
         return;
     }
 
+    mLocalDevice->powerOn();
+
     connect(mDiscoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered, this, [&](const QBluetoothDeviceInfo& info) {
         if (info.name() == "LUCAS_BT") {
             mUI->statusBar->showMessage("Conectando...");
 
-            // TODO: confirm that this UUID is the same for all esp32 modules (i'm fairy certain it is)
-            mSocket->connectToService(info.address(), QBluetoothUuid("00001101-0000-1000-8000-00805F9B34FB"));
+            mDiscoveryAgent->stop();
+            mSocket->connectToService(info.address(), QBluetoothUuid::ServiceClassUuid::SerialPort);
         }
     });
 
-    connect(mDiscoveryAgent, &QBluetoothDeviceDiscoveryAgent::errorOccurred, this, [&](QBluetoothDeviceDiscoveryAgent::Error error) {
+    connect(mDiscoveryAgent, &QBluetoothDeviceDiscoveryAgent::errorOccurred, this, [&](QBluetoothDeviceDiscoveryAgent::Error) {
         mUI->statusBar->showMessage(QString("Erro na descoberta - %0 [%1]")
                                         .arg(mDiscoveryAgent->errorString())
                                         .arg(static_cast<int>(mDiscoveryAgent->error())));
@@ -59,6 +61,7 @@ QTester::QTester(QWidget* parent)
             qDebug() << "discovery finshed";
             break;
         default:
+            qDebug() << "device not found, searching again";
             searchForDevice();
         }
     });
@@ -367,7 +370,6 @@ void QTester::continueStreamingNewFirmware() {
 }
 
 void QTester::onSocketReady() {
-    qDebug() << "ready to read";
     while (mSocket->canReadLine())
         interpretLineFromMachine(mSocket->readLine().simplified());
 }
